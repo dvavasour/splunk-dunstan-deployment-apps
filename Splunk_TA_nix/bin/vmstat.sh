@@ -1,5 +1,5 @@
 #!/bin/sh                                                                                                
-# Copyright (C) 2005-2016 Splunk Inc. All Rights Reserved.                                                                    
+# Copyright (C) 2019 Splunk Inc. All Rights Reserved.
 #                                                                                                        
 #   Licensed under the Apache License, Version 2.0 (the "License");                                      
 #   you may not use this file except in compliance with the License.                                     
@@ -36,7 +36,7 @@ if [ "x$KERNEL" = "xLinux" ] ; then
 	PARSE_3='/interrupts$/ {interrupts=$1} /CPU context switches$/ {cSwitches=$1} /forks$/ {forks=$1}'
 	PARSE_4='/^CPU_COUNT/ {cpuCount=$2}'
 	PARSE_5='($3 ~ "INTR") {nr[NR+3]} NR in nr {interrupts_PS=$3}'
-	PARSE_6='($3 ~ "pgpgin*") {nr2[NR+3]} NR in nr2 {pgPageIn_PS=$3; pgPageOut_PS=$4}'
+	PARSE_6='($3 ~ "pgpgin*") {nr2[NR+3]} NR in nr2 {pgPageIn_PS=$2; pgPageOut_PS=$3}'
 	MASSAGE="$PARSE_0 $PARSE_1 $PARSE_2 $PARSE_3 $PARSE_4 $PARSE_5 $PARSE_6 $DERIVE"
 elif [ "x$KERNEL" = "xSunOS" ] ; then
 	assertHaveCommand vmstat
@@ -56,8 +56,13 @@ elif [ "x$KERNEL" = "xSunOS" ] ; then
 	PARSE_4='/^Total: / {processes=$2; threads=$4; loadAvg1mi=0+$(NF-2)}'
 	PARSE_5='/^CPU_COUNT/ {cpuCount=$2}'
 	# Sample output: http://opensolarisforum.org/man/man1/sar.html
-	PARSE_6='($3 ~ "atch*") {nr[NR+3]} NR in nr {pgPagein_PS=$5}'
-	PARSE_7='($3 ~ "pgout*") {nr2[NR+3]} NR in nr2 {pgPageOut_PS=$4}'
+	if $SOLARIS_10 || $SOLARIS_11 ; then
+		PARSE_6='($1 ~ "atch*") {nr[NR+3]} NR in nr {pgPageIn_PS=$3;}'
+		PARSE_7='($3 ~ "ppgout*") {nr2[NR+3]} NR in nr2 {pgPageOut_PS=$3}'
+	else
+		PARSE_6='($3 ~ "atch*") {nr[NR+3]} NR in nr {pgPageIn_PS=$5}'
+		PARSE_7='($3 ~ "pgout*") {nr2[NR+3]} NR in nr2 {pgPageOut_PS=$4}'
+	fi
 	MASSAGE="$PARSE_0 $PARSE_1 $PARSE_2 $PARSE_3 $PARSE_4 $PARSE_5 $PARSE_6 $PARSE_7 $DERIVE"
 elif [ "x$KERNEL" = "xAIX" ] ; then
 	assertHaveCommand uptime
@@ -65,10 +70,10 @@ elif [ "x$KERNEL" = "xAIX" ] ; then
 	assertHaveCommand vmstat
 	assertHaveCommandGivenPath /usr/sbin/swap
 	assertHaveCommandGivenPath /usr/bin/svmon
-	CMD='eval uptime ; ps -e | wc -l ; ps -em | wc -l ; /usr/sbin/swap -s ; vmstat    1 1 ; vmstat -s ; svmon; `dirname $0`/hardware.sh;'
+	CMD='eval uptime ; ps -e | wc -l ; ps -em | wc -l ; /usr/sbin/swap -s ; vmstat    1 1 | tail -1 ; vmstat -s ; svmon; `dirname $0`/hardware.sh;'
 	PARSE_0='NR==1 {loadAvg1mi=0+$(NF-2)} NR==2 {processes=$1} NR==3 {threads=$1-processes }'
         # ps -em inclundes processes with there threads ( at least one), so processes must be excluded to count threads #
-	PARSE_1='(NR==4) {swapUsed=0+$(NF-5); swapFree=0+$(NF-1)} (NR==5) {pgPageIn_PS=0+$(NF-11); pgPageOut_PS=0+$(NF-10)}'
+	PARSE_1='(NR==4) {swapUsed=0+$(NF-5); swapFree=0+$(NF-1)} (NR==5) {pgPageIn_PS=0+$(NF-13); pgPageOut_PS=0+$(NF-12)}'
 	PARSE_2='/^memory / {memTotalMB=$2 / 256 ; memFreeMB=$4 / 256}'
 	PARSE_3='/paging space page outs$/ {pgPageOut=$1 ; pgSwapOut="?" }'
         # no pgSwapOut parameter and can't be monitored in AIX (by Jacky Ho, Systex)
@@ -118,7 +123,7 @@ elif [ "x$KERNEL" = "xFreeBSD" ] ; then
 	PARSE_0='(NR==1) {memTotalMB=$2 / (1024*1024)}'
 	PARSE_1='/pager pages paged out$/ {pgPageOut+=$1} /fork\(\) calls$/ {forks+=$1} /cpu context switches$/ {cSwitches+=$1} /interrupts$/ {interrupts+=$1}'
 	PARSE_2='/load averages:/ {loadAvg1mi=$6} /^[0-9]+ processes: / {processes=$1}'
-	PARSE_3='/^Swap: / {swapUsed=toMB($4); swapFree=toMB($6)} /^Mem: / {memFreeMB=toMB($4)+toMB($12)}'
+	PARSE_3='/^Swap: / {if(NF <= 5){ swapTotal=toMB($2); swapFree=toMB($4); swapUsed=swapTotal-swapFree; } else{ swapUsed=toMB($4); swapFree=toMB($6)}} /^Mem: / {memFreeMB=toMB($4)+toMB($12)}'
 	PARSE_4='/^CPU_COUNT/ {cpuCount=$2}'
 	PARSE_5='($3 ~ "INTR") {nr1[NR+3]} NR in nr1 {interrupts_PS=$3}'
 	PARSE_6='($3 ~ "pgpgin*") {nr2[NR+3]} NR in nr2 {pgPageIn_PS=$3; pgPageOut_PS=$4}'
